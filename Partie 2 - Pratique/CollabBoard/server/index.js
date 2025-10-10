@@ -87,7 +87,6 @@ io.on('connection', (socket) => {
           `Accès refusé pour ${newRoom}: ID invalide.`
         )
       }
-    } else if (roomId) {
     }
 
     if (oldRoom && activeRooms.has(oldRoom)) {

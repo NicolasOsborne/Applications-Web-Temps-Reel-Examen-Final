@@ -62,7 +62,7 @@ function createRoomIcon(roomName, roomId) {
   iconDiv.className = 'desktop-icon'
   iconDiv.onclick = () => openRoomWindow(roomName, roomId)
   iconDiv.innerHTML = `
-    <img src="/img/notepad.png" alt="${roomName}">
+    <img src="/assets/file.png" alt="${roomName}">
       ${roomName}
    `
   desktopIconsContainer.appendChild(iconDiv)
