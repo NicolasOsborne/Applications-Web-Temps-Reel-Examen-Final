@@ -1,0 +1,24 @@
+:root {
+  --gray-light: #c0c0c0;
+  --gray-dark: #808080;
+  --white: #ffffff;
+  --black: #000000;
+  --blue-title: #000080;
+  --blue-highlight: #1084d0;
+  --font-family-classic: 'Inter', sans-serif;
+}
+
+body {
+  background-color: #008080;
+  font-family: var(--font-family-classic);
+  margin: 0;
+  padding: 20px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  min-height: 100vh;
+}
+
+.hidden {
+  display: none;
+}

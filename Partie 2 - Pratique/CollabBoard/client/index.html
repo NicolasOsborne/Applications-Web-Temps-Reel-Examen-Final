@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+   <meta charset="UTF-8">
+   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+   <title>CollabBoard</title>
+   <link rel="stylesheet" href="styles/styles.css">
+   <link rel="preconnect" href="https://fonts.googleapis.com">
+   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+   <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+</head>
+
+<body>
+   <h1>CollabBoard 📝</h1>
+
+   <div id="login">
+      <h2>Rejoindre l'Espace</h2>
+      <input type="text" id="username" placeholder="Votre Pseudo" required value="User_A"><br><br>
+      <input type="text" id="room" placeholder="Nom de l'espace (Room)" required value="projetX"><br><br>
+      <input type="password" id="token" placeholder="Token (12345)" required value="12345"><br><br>
+      <button onclick="connectSocket()">Rejoindre la Session</button>
+      <p id="error_message"></p>
+   </div>
+
+   <div id="app">
+      <h3>Espace : <span id="current_room"></span></h3>
+      <p class="user-list">Utilisateurs connectés: <span id="user_count">0</span></p>
+      <div id="notifications"></div>
+      <textarea id="editor" placeholder="Commencez à collaborer..."></textarea>
+   </div>
+
+   <script src="/socket.io/socket.io.js"></script>
+   <script src="js/script.js"></script>
+</body>
+
+</html>
