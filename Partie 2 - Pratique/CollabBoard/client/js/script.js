@@ -13,15 +13,14 @@ let openedRooms = new Map()
 
 function loginAndShowDesktop() {
   const username = document.getElementById('username').value.trim()
-  const token = document.getElementById('token').value.trim()
 
-  if (!username || !token) {
-    errorMsg.textContent = 'Pseudo et Token sont requis.'
+  if (!username) {
+    errorMsg.textContent = 'Pseudo requis.'
     return
   }
 
   socket = io({
-    query: { username, token, room: 'general' },
+    query: { username, room: 'general' },
   })
 
   socket.on('connect', () => {
@@ -49,23 +48,23 @@ async function loadDesktopIcons() {
     desktopIconsContainer.innerHTML = ''
     desktopIconsContainer.appendChild(staticIcon)
 
-    status.activeRooms.forEach((roomName) => {
-      if (roomName === 'general') return
-      createRoomIcon(roomName)
+    status.activeRooms.forEach((room) => {
+      if (room.name === 'general' || room.name === '__CONNECTED__') return
+      createRoomIcon(room.name, room.id)
     })
   } catch (e) {
     console.error('Erreur lors du chargement des icônes du bureau:', e)
   }
 }
 
-function createRoomIcon(roomName) {
+function createRoomIcon(roomName, roomId) {
   const iconDiv = document.createElement('div')
   iconDiv.className = 'desktop-icon'
-  iconDiv.onclick = () => openRoomWindow(roomName)
+  iconDiv.onclick = () => openRoomWindow(roomName, roomId)
   iconDiv.innerHTML = `
-        <img src="/img/notepad.png" alt="${roomName}">
-        ${roomName}
-    `
+    <img src="/img/notepad.png" alt="${roomName}">
+      ${roomName}
+   `
   desktopIconsContainer.appendChild(iconDiv)
 }
 
@@ -85,7 +84,7 @@ function createAndJoinNewRoom() {
   }
 }
 
-function openRoomWindow(roomName) {
+function openRoomWindow(roomName, roomId) {
   if (openedRooms.has(roomName)) {
     const existingWindow = document.getElementById(`room-${roomName}`)
     existingWindow.style.zIndex = 500
@@ -117,7 +116,7 @@ function openRoomWindow(roomName) {
    `
   roomWindowsContainer.appendChild(windowDiv)
 
-  socket.emit('join_room', roomName)
+  socket.emit('join_room', { roomName, roomId })
 
   openedRooms.set(roomName, {
     element: windowDiv,
@@ -165,11 +164,17 @@ function setupSocketListeners() {
     console.log(`[Notification] ${message}`)
   })
 
+  socket.on('join_error', (message) => {
+    alert(message)
+    console.error(`[Join Error] ${message}`)
+    closeRoomWindow(openedRooms.keys().next().value)
+  })
+
   socket.on('user_list_update', (roomUsers) => {
     updateUserList(roomUsers)
   })
 
-  socket.on('room_created', () => {
+  socket.on('room_created', (room) => {
     loadDesktopIcons()
   })
 }

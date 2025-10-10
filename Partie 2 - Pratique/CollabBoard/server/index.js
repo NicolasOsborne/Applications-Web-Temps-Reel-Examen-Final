@@ -14,12 +14,24 @@ const io = new Server(server, {
   },
 })
 
+// Servir les fichiers clients du frontend
 const clientPath = path.join(__dirname, '..', 'client')
 app.use(express.static(clientPath))
-
 app.get('/', (req, res) => {
   res.sendFile(path.join(clientPath, 'index.html'))
 })
+app.use(express.static('client'))
+
+// Généreration d'un token simple pour un id de room
+function generateRoomId(length = 10) {
+  const characters =
+    'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+  let result = ''
+  for (let i = 0; i < length; i++) {
+    result += characters.charAt(Math.floor(Math.random() * characters.length))
+  }
+  return result
+}
 
 // Monitoring & State Management
 let activeRooms = new Map()
@@ -27,20 +39,15 @@ let totalConnections = 0
 let eventsPerMinute = 0
 let lastEventTime = Date.now()
 
-// Middleware pour la vérification du token et l'attachement de la room
+// Middleware pour la vérification du username
 io.use((socket, next) => {
-  const token = socket.handshake.query.token
-  const room = socket.handshake.query.room
   const username = socket.handshake.query.username
 
-  if (token !== '12345') {
-    return next(new Error('Authentication error: Invalid token'))
-  }
-  if (!room || !username) {
-    return next(new Error('Connection error: Room and username are required'))
+  if (!username) {
+    return next(new Error('Connection error: Username is required'))
   }
 
-  socket.data.room = room
+  socket.data.room = 'general'
   socket.data.username = username
   next()
 })
@@ -67,9 +74,21 @@ io.on('connection', (socket) => {
   emitUserListUpdate()
 
   // Rejoindre la Room
-  socket.on('join_room', (newRoom) => {
+  socket.on('join_room', ({ roomName, roomId }) => {
     const oldRoom = socket.data.room
     const { username } = socket.data
+    const newRoom = roomName
+
+    if (activeRooms.has(newRoom)) {
+      const existingRoomData = activeRooms.get(newRoom)
+      if (existingRoomData.id !== roomId) {
+        return socket.emit(
+          'join_error',
+          `Accès refusé pour ${newRoom}: ID invalide.`
+        )
+      }
+    } else if (roomId) {
+    }
 
     if (oldRoom && activeRooms.has(oldRoom)) {
       activeRooms.get(oldRoom).users.delete(socket.id)
@@ -82,23 +101,27 @@ io.on('connection', (socket) => {
     socket.data.room = newRoom
 
     if (!activeRooms.has(newRoom)) {
+      const newId = generateRoomId()
       activeRooms.set(newRoom, {
         users: new Map(),
         content: '',
         eventsCount: 0,
+        id: newId,
       })
-      io.emit('room_created', newRoom)
+      io.emit('room_created', { name: newRoom, id: newId })
     }
 
     const roomData = activeRooms.get(newRoom)
     roomData.users.set(socket.id, username)
 
-    //  activeRooms.get('__global__').users.delete(socket.id)
-
     socket.emit('initial_content', { room: newRoom, content: roomData.content })
     socket.to(newRoom).emit('notification', `${username} a rejoint ${newRoom}.`)
 
-    console.log(`[ROOM_CHANGE] ${username} joined: ${newRoom}`)
+    console.log(
+      `[ROOM_CHANGE] ${username} joined: ${newRoom} (ID: ${
+        roomData.id || roomId
+      })`
+    )
     emitUserListUpdate()
   })
 
@@ -194,11 +217,14 @@ app.get('/status', (req, res) => {
   const statusData = {
     totalConnections: totalConnections,
     eventsLastMinute: eventsPerMinute,
-    activeRooms: Array.from(activeRooms.keys()),
+    activeRooms: [],
     roomDetails: {},
   }
 
   activeRooms.forEach((data, roomName) => {
+    if (roomName === 'general' || roomName === '__CONNECTED__') return
+
+    statusData.activeRooms.push({ name: roomName, id: data.id })
     statusData.roomDetails[roomName] = {
       usersCount: data.users.size,
       eventsInRoom: data.eventsCount,
@@ -207,9 +233,6 @@ app.get('/status', (req, res) => {
 
   res.json(statusData)
 })
-
-// Servir les fichiers clients
-app.use(express.static('client'))
 
 // Démarrage du serveur
 const PORT = process.env.PORT || 3000
