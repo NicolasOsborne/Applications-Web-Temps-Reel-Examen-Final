@@ -9,25 +9,69 @@
    <link rel="preconnect" href="https://fonts.googleapis.com">
    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
    <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+   <link rel="stylesheet" href="https://unpkg.com/98.css">
 </head>
 
 <body>
-   <h1>CollabBoard 📝</h1>
+   <div id="desktop">
+      <div class="window" id="login-window">
+         <div class="title-bar">
+            <div class="title-bar-text">Connexion</div>
+            <div class="title-bar-controls"><button aria-label="Close"></button></div>
+         </div>
+         <div class="window-body">
+            <p>Veuillez choisir votre pseudonyme pour continuer.</p>
+            <div class="field-row">
+               <label for="username">Pseudo:</label>
+               <input type="text" id="username" value="User_A">
+            </div>
+            <div class="field-row">
+               <label for="token">Token:</label>
+               <input type="password" id="token" value="12345">
+            </div>
+            <section class="field-row" style="justify-content: flex-end">
+               <button onclick="loginAndShowDesktop()">Connexion</button>
+               <button disabled>Annuler</button>
+            </section>
+            <p id="error_message"></p>
+         </div>
+      </div>
 
-   <div id="login">
-      <h2>Rejoindre l'Espace</h2>
-      <input type="text" id="username" placeholder="Votre Pseudo" required value="User_A"><br><br>
-      <input type="text" id="room" placeholder="Nom de l'espace (Room)" required value="projetX"><br><br>
-      <input type="password" id="token" placeholder="Token (12345)" required value="12345"><br><br>
-      <button onclick="connectSocket()">Rejoindre la Session</button>
-      <p id="error_message"></p>
-   </div>
+      <div class="window" id="user-list-window"
+         style="width: 250px; position: absolute; left: 10px; top: 10px; display: none;">
+         <div class="title-bar">
+            <div class="title-bar-text">Utilisateurs Connectés</div>
+         </div>
+         <div class="window-body" id="user-list-content">
+         </div>
+      </div>
 
-   <div id="app">
-      <h3>Espace : <span id="current_room"></span></h3>
-      <p class="user-list">Utilisateurs connectés: <span id="user_count">0</span></p>
-      <div id="notifications"></div>
-      <textarea id="editor" placeholder="Commencez à collaborer..."></textarea>
+      <div id="desktop-icons" style="position: absolute; right: 20px; top: 20px; display: none;">
+         <div class="desktop-icon" onclick="openCreateRoomWindow()">
+            <img src="/img/new_folder.png" alt="Créer">
+            Créer une room
+         </div>
+      </div>
+
+      <div id="room-windows-container">
+      </div>
+
+      <div class="window" id="create-room-modal"
+         style="width: 300px; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: none; z-index: 500;">
+         <div class="title-bar">
+            <div class="title-bar-text">Créer une nouvelle Room</div>
+            <div class="title-bar-controls"><button aria-label="Close" onclick="closeCreateRoomWindow()"></button></div>
+         </div>
+         <div class="window-body">
+            <div class="field-row">
+               <label for="new_room_name">Nom de la Room:</label>
+               <input type="text" id="new_room_name" value="NouveauProjet">
+            </div>
+            <section class="field-row" style="justify-content: flex-end">
+               <button onclick="createAndJoinNewRoom()">Créer et Rejoindre</button>
+            </section>
+         </div>
+      </div>
    </div>
 
    <script src="/socket.io/socket.io.js"></script>

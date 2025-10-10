@@ -50,3 +50,4 @@ npm run start
 ```
 
 - Accéder à l'application à l'addresse http://localhost:3000
+- Accéder au Dashboard JSON simple du serveur à l'addresse http://localhost:3000/status

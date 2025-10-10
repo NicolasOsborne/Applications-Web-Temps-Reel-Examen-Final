@@ -49,25 +49,115 @@ io.on('connection', (socket) => {
   const { room, username } = socket.data
 
   totalConnections++
-  if (!activeRooms.has(room)) {
-    activeRooms.set(room, { users: new Map(), content: '', eventsCount: 0 })
-  }
-  const roomData = activeRooms.get(room)
-  roomData.users.set(socket.id, username)
 
-  // Rejoindre la Room
-  socket.join(room)
+  const GLOBAL_KEY = '__CONNECTED__'
+  if (!activeRooms.has(GLOBAL_KEY)) {
+    activeRooms.set(GLOBAL_KEY, {
+      users: new Map(),
+      content: '',
+      eventsCount: 0,
+    })
+  }
+  activeRooms.get(GLOBAL_KEY).users.set(socket.id, username)
+
   console.log(
-    `User ${username} (ID: ${socket.id}) joined room: ${room}. Total: ${totalConnections}`
+    `[CONNECT] User ${username} (ID: ${socket.id}) connected. Total: ${totalConnections}`
   )
 
-  // Notification de Connexion à la Room
-  socket.to(room).emit('notification', `${username} a rejoint l'espace.`)
+  emitUserListUpdate()
 
-  socket.emit('initial_content', roomData.content)
+  // Rejoindre la Room
+  socket.on('join_room', (newRoom) => {
+    const oldRoom = socket.data.room
+    const { username } = socket.data
+
+    if (oldRoom && activeRooms.has(oldRoom)) {
+      activeRooms.get(oldRoom).users.delete(socket.id)
+      socket.leave(oldRoom)
+    }
+
+    activeRooms.get(GLOBAL_KEY).users.delete(socket.id)
+
+    socket.join(newRoom)
+    socket.data.room = newRoom
+
+    if (!activeRooms.has(newRoom)) {
+      activeRooms.set(newRoom, {
+        users: new Map(),
+        content: '',
+        eventsCount: 0,
+      })
+      io.emit('room_created', newRoom)
+    }
+
+    const roomData = activeRooms.get(newRoom)
+    roomData.users.set(socket.id, username)
+
+    //  activeRooms.get('__global__').users.delete(socket.id)
+
+    socket.emit('initial_content', { room: newRoom, content: roomData.content })
+    socket.to(newRoom).emit('notification', `${username} a rejoint ${newRoom}.`)
+
+    console.log(`[ROOM_CHANGE] ${username} joined: ${newRoom}`)
+    emitUserListUpdate()
+  })
+
+  socket.on('leave_room', (roomToLeave) => {
+    const { username } = socket.data
+
+    if (activeRooms.has(roomToLeave)) {
+      activeRooms.get(roomToLeave).users.delete(socket.id)
+    }
+
+    socket.leave(roomToLeave)
+
+    activeRooms.get(GLOBAL_KEY).users.set(socket.id, username)
+
+    socket.data.room = 'general'
+
+    console.log(`[ROOM_LEAVE] ${socket.data.username} left: ${roomToLeave}`)
+    emitUserListUpdate()
+  })
+
+  // Gestion de la Déconnexion
+  socket.on('disconnect', () => {
+    totalConnections--
+    const { room, username } = socket.data
+
+    if (activeRooms.has(room)) {
+      activeRooms.get(room).users.delete(socket.id)
+      if (activeRooms.get(room).users.size === 0) {
+        activeRooms.delete(room)
+        console.log(`Room ${room} is empty and closed.`)
+      }
+    }
+
+    if (activeRooms.has(GLOBAL_KEY)) {
+      activeRooms.get(GLOBAL_KEY).users.delete(socket.id)
+    }
+
+    socket.to(room).emit('notification', `${username} a quitté l'espace.`)
+
+    console.log(`User ${username} disconnected. Total: ${totalConnections}`)
+    emitUserListUpdate()
+  })
+
+  // Notification de Connexion à la Room
+  //   socket.to(room).emit('notification', `${username} a rejoint l'espace.`)
+
+  //   socket.emit('initial_content', roomData.content)
 
   // Gestion des Événements Temps Réel
-  socket.on('update', (content) => {
+  socket.on('update', ({ room, content }) => {
+    if (!activeRooms.has(room) || socket.data.room !== room) {
+      console.warn(
+        `[SECURITY] User ${socket.data.username} tried to update unauthorized room: ${room}`
+      )
+      return
+    }
+
+    const roomData = activeRooms.get(room)
+
     roomData.content = content
     roomData.eventsCount++
 
@@ -78,26 +168,25 @@ io.on('connection', (socket) => {
     }
     eventsPerMinute++
 
-    // Broadcast
-    socket.to(room).emit('update', content)
+    socket.to(room).emit('update', { room, content })
   })
 
-  // Gestion de la Déconnexion ---
-  socket.on('disconnect', () => {
-    totalConnections--
-    roomData.users.delete(socket.id)
+  function emitUserListUpdate() {
+    const roomUsers = {}
+    activeRooms.forEach((data, roomName) => {
+      if (roomName === 'general') return
 
-    if (roomData.users.size === 0) {
-      activeRooms.delete(room)
-      console.log(`Room ${room} is empty and closed.`)
+      const displayRoomName = roomName === GLOBAL_KEY ? 'Connectés' : roomName
+
+      roomUsers[displayRoomName] = Array.from(data.users.values())
+    })
+
+    if (!roomUsers['Connectés']) {
+      roomUsers['Connectés'] = []
     }
 
-    socket.to(room).emit('notification', `${username} a quitté l'espace.`)
-
-    console.log(
-      `User ${username} left room: ${room}. Total: ${totalConnections}`
-    )
-  })
+    io.emit('user_list_update', roomUsers)
+  }
 })
 
 // Endpoint de Monitoring (/status)
@@ -119,7 +208,7 @@ app.get('/status', (req, res) => {
   res.json(statusData)
 })
 
-// Servir les fichiers clients pour l'exemple
+// Servir les fichiers clients
 app.use(express.static('client'))
 
 // Démarrage du serveur
