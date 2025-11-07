@@ -3,6 +3,40 @@ const http = require('http')
 const { Server } = require('socket.io')
 const path = require('path')
 
+// Configuration de la base de données locale SQLite
+const sqlite = require('sqlite3').verbose()
+const db = new sqlite.Database('./collaboard.db', (error) => {
+  if (error) {
+    console.error('Erreur lors de la connexion à SQLite: ', error.message)
+  } else {
+    console.log('Connexion à la base de données collaboard.db réussie ! ')
+    initalizeDatabase()
+  }
+})
+
+// Créer la table "rooms" si elle n'existe pas déja
+function initalizeDatabase() {
+  const sql = `
+    CREATE TABLE IF NOT EXISTS rooms (
+      id TEXT PRIMARY KEY,
+      name TEXT UNIQUE NOT NULL,
+      content TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `
+
+  db.run(sql, (error) => {
+    if (error) {
+      console.error(
+        'Erreur lors de la création de la table "rooms": ',
+        error.message
+      )
+    } else {
+      console.log('Table rooms créée avec succès !')
+    }
+  })
+}
+
 const app = express()
 const server = http.createServer(app)
 
@@ -31,6 +65,40 @@ function generateRoomId(length = 10) {
     result += characters.charAt(Math.floor(Math.random() * characters.length))
   }
   return result
+}
+
+// Récupérer une room depuis la base de données
+function getRoomFromDb(roomName) {
+  return new Promise((resolve, reject) => {
+    const sql = 'SELECT id, name, content FROM rooms WHERE name = ?'
+    db.get(sql, [roomName], (error, row) => {
+      if (error) {
+        reject(error)
+      } else {
+        resolve(row)
+      }
+    })
+  })
+}
+
+// Sauvegarder une room dans la base de données
+function saveRoomToDb(roomName, content, roomId) {
+  return new Promise((resolve, reject) => {
+    const sql = `
+      INSERT OR REPLACE INTO rooms (id, name, content) 
+      VALUES (?, ?, ?)`
+
+    db.run(sql, [roomId, roomName, content], function (error) {
+      if (error) {
+        reject(error)
+      } else {
+        resolve({
+          message: 'Room sauvegardée/mise à jour.',
+          changes: this.changes,
+        })
+      }
+    })
+  })
 }
 
 // Monitoring & State Management
@@ -74,14 +142,24 @@ io.on('connection', (socket) => {
   emitUserListUpdate()
 
   // Rejoindre la Room
-  socket.on('join_room', ({ roomName, roomId }) => {
+  socket.on('join_room', async ({ roomName, roomId }) => {
     const oldRoom = socket.data.room
     const { username } = socket.data
     const newRoom = roomName
 
-    if (activeRooms.has(newRoom)) {
-      const existingRoomData = activeRooms.get(newRoom)
-      if (existingRoomData.id !== roomId) {
+    let roomFromDb
+    try {
+      roomFromDb = await getRoomFromDb(newRoom)
+    } catch (e) {
+      console.error(`[DB ERROR] Failed to load room ${newRoom}:`, e)
+      return socket.emit(
+        'join_error',
+        'Erreur serveur lors du chargement de la room.'
+      )
+    }
+
+    if (roomFromDb) {
+      if (roomId && roomFromDb.id !== roomId) {
         return socket.emit(
           'join_error',
           `Accès refusé pour ${newRoom}: ID invalide.`
@@ -99,31 +177,49 @@ io.on('connection', (socket) => {
     socket.join(newRoom)
     socket.data.room = newRoom
 
+    let currentRoomId = roomId
+    let initialContent = ''
+
     if (!activeRooms.has(newRoom)) {
-      const newId = generateRoomId()
+      const newId = roomFromDb ? roomFromDb.id : generateRoomId()
+      currentRoomId = newId
+
       activeRooms.set(newRoom, {
         users: new Map(),
-        content: '',
         eventsCount: 0,
         id: newId,
       })
-      io.emit('room_created', { name: newRoom, id: newId })
+
+      if (!roomFromDb) {
+        try {
+          await saveRoomToDb(newRoom, '', newId)
+          io.emit('room_created', { name: newRoom, id: newId })
+        } catch (e) {
+          console.error(`[DB ERROR] Failed to create room ${newRoom}:`, e)
+        }
+      }
     }
 
     const roomData = activeRooms.get(newRoom)
     roomData.users.set(socket.id, username)
 
-    socket.emit('initial_content', { room: newRoom, content: roomData.content })
+    initialContent = roomFromDb ? roomFromDb.content : ''
+
+    socket.emit('initial_content', {
+      room: newRoom,
+      content: initialContent,
+    })
     socket.to(newRoom).emit('notification', `${username} a rejoint ${newRoom}.`)
 
     console.log(
       `[ROOM_CHANGE] ${username} joined: ${newRoom} (ID: ${
-        roomData.id || roomId
+        currentRoomId || roomFromDb.id
       })`
     )
     emitUserListUpdate()
   })
 
+  // Quitter la room
   socket.on('leave_room', (roomToLeave) => {
     const { username } = socket.data
 
@@ -170,7 +266,7 @@ io.on('connection', (socket) => {
   //   socket.emit('initial_content', roomData.content)
 
   // Gestion des Événements Temps Réel
-  socket.on('update', ({ room, content }) => {
+  socket.on('update', async ({ room, content }) => {
     if (!activeRooms.has(room) || socket.data.room !== room) {
       console.warn(
         `[SECURITY] User ${socket.data.username} tried to update unauthorized room: ${room}`
@@ -180,7 +276,12 @@ io.on('connection', (socket) => {
 
     const roomData = activeRooms.get(room)
 
-    roomData.content = content
+    try {
+      await saveRoomToDb(room, content, roomData.id)
+    } catch (error) {
+      console.error(`[DB ERROR] Failed to save room ${room}:`, error)
+    }
+
     roomData.eventsCount++
 
     const now = Date.now()
@@ -212,7 +313,7 @@ io.on('connection', (socket) => {
 })
 
 // Endpoint de Monitoring (/status)
-app.get('/status', (req, res) => {
+app.get('/status', async (req, res) => {
   const statusData = {
     totalConnections: totalConnections,
     eventsLastMinute: eventsPerMinute,
@@ -220,10 +321,21 @@ app.get('/status', (req, res) => {
     roomDetails: {},
   }
 
+  try {
+    const allRooms = await new Promise((resolve, reject) => {
+      db.all('SELECT name, id FROM rooms', (err, rows) => {
+        if (err) reject(err)
+        else resolve(rows)
+      })
+    })
+    statusData.activeRooms = allRooms.map((r) => ({ name: r.name, id: r.id }))
+  } catch (error) {
+    console.error('[DB ERROR] Failed to load all rooms for status:', error)
+  }
+
   activeRooms.forEach((data, roomName) => {
     if (roomName === 'general' || roomName === '__CONNECTED__') return
 
-    statusData.activeRooms.push({ name: roomName, id: data.id })
     statusData.roomDetails[roomName] = {
       usersCount: data.users.size,
       eventsInRoom: data.eventsCount,
@@ -241,22 +353,3 @@ server.listen(PORT, () => {
   )
   console.log(`Monitoring status available at http://localhost:${PORT}/status`)
 })
-
-// --- BONUS: Implémentation du Redis Adapter ---
-/* // Code pour le bonus Redis (nécessite redis-server en cours d'exécution)
-const { createAdapter } = require('@socket.io/redis-adapter');
-const { createClient } = require('redis');
-
-async function setupRedisAdapter() {
-    const pubClient = createClient({ url: "redis://localhost:6379" });
-    const subClient = pubClient.duplicate();
-
-    await Promise.all([pubClient.connect(), subClient.connect()]);
-
-    io.adapter(createAdapter(pubClient, subClient));
-    console.log("Redis Adapter configured successfully.");
-}
-
-// Décommenter pour activer le bonus
-// setupRedisAdapter().catch(err => console.error("Redis connection failed:", err));
-*/

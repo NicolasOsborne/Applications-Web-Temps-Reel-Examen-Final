@@ -1,36 +1,26 @@
 # Nicolas OSBORNE
 
-# Applications Web Temps Réel - Examen Final
+# Applications Web Temps Réel - Examen Final (Session 2) - Persistance des données/Sécurité/Monitoring
 
-# Partie 2 - Réalisation pratique
+# Partie B - Réalisation pratique
 
-Application de tableau blanc collaboratif en temps réel Collaboard, permettant à plusieurs utilisateurs connectés de travailler simultanément sur le même espace.
-Chaque modification effectuée par un utilisateur doit être immédiatement visible par les autres.
+Il s'agit ici de la même application Collaboard (développée dans la partie pratique du 1er rendu), mais cette fois-ci étendue avec des fonctionnalités supplémentaire :
 
-- Chaque utilisateur saisit un pseudo avant de rejoindre la session.
-- Le serveur conserve une liste simple des utilisateurs connectés.
-- À la connexion/déconnexion, un événement `notification` informe tous les clients.
-
-- Les utilisteurs partagent un espace de travail commun.
-- Les modifications sont transmises en temps réel via `Socket.IO` avec un événement `update`.
-
-- Les utilsateurs peuvent créer ou rejoindre une `room`.
-- Les événements ne concernent que les utilisateurs d'une même room.
-
-- Utilisation d'un `token temporaire` pour rejoindre une room.
-- Vérification du token côté serveur avant d'accepter la connexion Socket.IO.
-
-- Le serveur affiche en console :
-  - Le nombre de connexions actives.
-  - Le nombre d'événements émis par minute.
-  - Les rooms actives.
-  - Affichage sur une page `/status` du serveur.
+- Une persistance des données (SQLite).
+- Une authentification (JWT et hash bcrypt).
+- Des règles de sécurité (limitation de certaines actions par utilisateur, validation côté serveur et sanitisation des inputs contre les injections malveillantes).
+- Reconnexion automatique en cas de perte de connexion.
+- Monitoring (compteur de connexions, affichage de la latence, logs de synchronisation).
 
 ## Technologies utilisées
 
 - Node.js
 - Express
 - Socket.IO
+- JWT
+- Bcrypt
+- SQLite
+- Winston
 
 ## Lancer l'application
 
@@ -39,7 +29,7 @@ Chaque modification effectuée par un utilisateur doit être immédiatement visi
 - Installer les dépendances :
 
 ```bash
-cd CollabBoard
+cd CollabBoard-2
 npm install
 ```
 
