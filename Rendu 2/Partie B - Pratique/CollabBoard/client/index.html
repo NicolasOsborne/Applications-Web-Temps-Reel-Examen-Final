@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+   <meta charset="UTF-8">
+   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+   <title>CollabBoard</title>
+   <link rel="stylesheet" href="styles/styles.css">
+   <link rel="preconnect" href="https://fonts.googleapis.com">
+   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+   <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+   <link rel="stylesheet" href="https://unpkg.com/98.css">
+</head>
+
+<body>
+   <div id="desktop">
+      <div class="window" id="login-window">
+         <div class="title-bar">
+            <div class="title-bar-text">Connexion</div>
+            <div class="title-bar-controls"><button aria-label="Close"></button></div>
+         </div>
+         <div class="window-body">
+            <p>Veuillez choisir votre pseudonyme pour continuer.</p>
+            <div class="field-row">
+               <label for="username">Pseudo:</label>
+               <input type="text" id="username" value="User_A">
+            </div>
+            <section class="field-row" style="justify-content: flex-end">
+               <button onclick="loginAndShowDesktop()">Connexion</button>
+               <button disabled>Annuler</button>
+            </section>
+            <p id="error_message"></p>
+         </div>
+      </div>
+
+      <div class="window" id="user-list-window"
+         style="width: 250px; position: absolute; left: 10px; top: 10px; display: none;">
+         <div class="title-bar">
+            <div class="title-bar-text">Utilisateurs Connectés</div>
+         </div>
+         <div class="window-body" id="user-list-content">
+         </div>
+      </div>
+
+      <div id="desktop-icons" style="position: absolute; right: 20px; top: 20px; display: none;">
+         <div class="desktop-icon" onclick="openCreateRoomWindow()">
+            <img src="/assets/desktop.png" alt="Créer">
+            Créer une room
+         </div>
+      </div>
+
+      <div id="room-windows-container">
+      </div>
+
+      <div class="window" id="create-room-modal"
+         style="width: 300px; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: none; z-index: 500;">
+         <div class="title-bar">
+            <div class="title-bar-text">Créer une nouvelle Room</div>
+            <div class="title-bar-controls"><button aria-label="Close" onclick="closeCreateRoomWindow()"></button></div>
+         </div>
+         <div class="window-body">
+            <div class="field-row">
+               <label for="new_room_name">Nom de la Room:</label>
+               <input type="text" id="new_room_name" value="NouveauProjet">
+            </div>
+            <section class="field-row" style="justify-content: flex-end">
+               <button onclick="createAndJoinNewRoom()">Créer et Rejoindre</button>
+            </section>
+         </div>
+      </div>
+   </div>
+
+   <script src="/socket.io/socket.io.js"></script>
+   <script src="js/script.js"></script>
+</body>
+
+</html>
