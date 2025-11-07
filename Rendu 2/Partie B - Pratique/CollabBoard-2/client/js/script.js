@@ -11,16 +11,51 @@ const errorMsg = document.getElementById('error_message')
 
 let openedRooms = new Map()
 
-function loginAndShowDesktop() {
-  const username = document.getElementById('username').value.trim()
+let userToken = null
 
-  if (!username) {
-    errorMsg.textContent = 'Pseudo requis.'
+async function handleAuth(type) {
+  const username = document.getElementById('username').value.trim()
+  const password = document.getElementById('password').value.trim()
+  const endpoint = type === 'login' ? '/api/login' : '/api/register'
+  errorMsg.textContent = ''
+
+  if (!username || !password) {
+    errorMsg.textContent = 'Pseudo et mot de passe requis.'
     return
   }
 
+  try {
+    const response = await fetch(`${API_BASE}${endpoint}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ username, password }),
+    })
+
+    const data = await response.json()
+
+    if (!response.ok) {
+      errorMsg.textContent = `Erreur ${type}: ${data.message}`
+      return
+    }
+
+    userToken = data.token
+    localStorage.setItem('userToken', userToken)
+    localStorage.setItem('username', username)
+
+    connectSocket(username)
+  } catch (e) {
+    errorMsg.textContent = 'Erreur de communication avec le serveur.'
+    console.error(e)
+  }
+}
+
+function connectSocket(username) {
+  if (!userToken) return
+
   socket = io({
-    query: { username, room: 'general' },
+    query: { username, token: userToken },
   })
 
   socket.on('connect', () => {
@@ -29,14 +64,28 @@ function loginAndShowDesktop() {
     userListWindow.style.display = 'block'
 
     loadDesktopIcons()
-
     setupSocketListeners()
   })
 
   socket.on('connect_error', (err) => {
-    errorMsg.textContent = `Échec de la connexion : ${err.message}`
-    socket.close()
+    errorMsg.textContent = `Échec de la connexion Socket: ${err.message}`
+    if (socket) socket.close()
   })
+}
+
+window.onload = () => {
+  const token = localStorage.getItem('userToken')
+  const username = localStorage.getItem('username')
+
+  if (token && username) {
+    userToken = token
+    document.getElementById('username').value = username
+    loginWindow.style.display = 'block'
+    errorMsg.textContent = 'Token trouvé. Tentez la connexion.'
+  } else {
+    loginWindow.style.display = 'block'
+  }
+  loadDesktopIcons()
 }
 
 async function loadDesktopIcons() {

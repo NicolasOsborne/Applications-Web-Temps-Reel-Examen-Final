@@ -3,6 +3,14 @@ const http = require('http')
 const { Server } = require('socket.io')
 const path = require('path')
 
+const jwt = require('jsonwebtoken')
+const bcrypt = require('bcrypt')
+const SALT_ROUNDS = 10
+
+require('dotenv').config()
+
+const JWT_SECRET = process.env.JWT_SECRET
+
 // Configuration de la base de données locale SQLite
 const sqlite = require('sqlite3').verbose()
 const db = new sqlite.Database('./collaboard.db', (error) => {
@@ -14,9 +22,9 @@ const db = new sqlite.Database('./collaboard.db', (error) => {
   }
 })
 
-// Créer la table "rooms" si elle n'existe pas déja
+// Créer les tables "rooms" et "users" si elles n'existent pas déja
 function initalizeDatabase() {
-  const sql = `
+  const roomSql = `
     CREATE TABLE IF NOT EXISTS rooms (
       id TEXT PRIMARY KEY,
       name TEXT UNIQUE NOT NULL,
@@ -25,7 +33,7 @@ function initalizeDatabase() {
     );
   `
 
-  db.run(sql, (error) => {
+  db.run(roomSql, (error) => {
     if (error) {
       console.error(
         'Erreur lors de la création de la table "rooms": ',
@@ -35,16 +43,36 @@ function initalizeDatabase() {
       console.log('Table rooms créée avec succès !')
     }
   })
+
+  const userSql = `
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL
+    );
+  `
+
+  db.run(userSql, (error) => {
+    if (error) {
+      console.error(
+        'Erreur lors de la création de la table "users": ',
+        error.message
+      )
+    } else {
+      console.log('Table users créée avec succès !')
+    }
+  })
 }
 
 const app = express()
-const server = http.createServer(app)
+app.use(express.json())
 
 // Configuration de Socket.IO
+const server = http.createServer(app)
 const io = new Server(server, {
   cors: {
     origin: '*',
-    methods: ['GET', 'POST'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
   },
 })
 
@@ -55,6 +83,93 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(clientPath, 'index.html'))
 })
 app.use(express.static('client'))
+
+// Routes d'authentification
+// Inscription (Register)
+app.post('/api/register', async (req, res) => {
+  const { username, password } = req.body
+
+  if (!username || !password) {
+    return res.status(400).json({ message: 'Username et mot de passe requis.' })
+  }
+
+  try {
+    const password_hash = await bcrypt.hash(password, SALT_ROUNDS)
+    const sql = `INSERT INTO users (username, password_hash) VALUES (?, ?)`
+    let userId = null
+
+    await new Promise((resolve, reject) => {
+      db.run(sql, [username, password_hash], function (err) {
+        if (err) return reject(err)
+        userId = this.lastID
+        resolve()
+      })
+    })
+
+    const token = jwt.sign({ username, userId }, JWT_SECRET, {
+      expiresIn: '1h',
+    })
+
+    res.status(201).json({
+      message: 'Inscription réussie.',
+      username,
+      token,
+    })
+  } catch (error) {
+    if (error.message && error.message.includes('SQLITE_CONSTRAINT: UNIQUE')) {
+      return res
+        .status(409)
+        .json({ message: "Ce nom d'utilisateur est déjà pris." })
+    }
+    console.error('[AUTH ERROR] Register failed:', error)
+    res.status(500).json({ message: "Erreur serveur lors de l'inscription." })
+  }
+})
+
+// Connexion (login)
+app.post('/api/login', async (req, res) => {
+  const { username, password } = req.body
+
+  if (!username || !password) {
+    return res.status(400).json({ message: 'Username et mot de passe requis.' })
+  }
+
+  try {
+    const user = await new Promise((resolve, reject) => {
+      db.get(
+        'SELECT id, username, password_hash FROM users WHERE username = ?',
+        [username],
+        (err, row) => {
+          if (err) return reject(err)
+          resolve(row)
+        }
+      )
+    })
+
+    if (!user) {
+      return res.status(401).json({ message: 'Identifiants invalides.' })
+    }
+
+    const match = await bcrypt.compare(password, user.password_hash)
+
+    if (!match) {
+      return res.status(401).json({ message: 'Identifiants invalides.' })
+    }
+
+    const token = jwt.sign({ username, userId: user.id }, JWT_SECRET, {
+      expiresIn: '1h',
+    })
+
+    res.status(200).json({
+      message: 'Connexion réussie.',
+      username,
+      token,
+    })
+  } catch (error) {
+    console.error('[AUTH ERROR] Login failed:', error)
+    res.status(500).json({ message: 'Erreur serveur lors de la connexion.' })
+  }
+})
 
 // Généreration d'un token simple pour un id de room
 function generateRoomId(length = 10) {
@@ -101,25 +216,57 @@ function saveRoomToDb(roomName, content, roomId) {
   })
 }
 
+// Supprimer une room dans la base de données
+function deleteRoomFromDb(roomName) {
+  return new Promise((resolve, reject) => {
+    const sql = `DELETE FROM rooms WHERE name = ?`
+
+    db.run(sql, [roomName], function (error) {
+      if (error) {
+        reject(error)
+      } else {
+        resolve({
+          message: `Room ${roomName} supprimée.`,
+          changes: this.changes,
+        })
+      }
+    })
+  })
+}
+
 // Monitoring & State Management
 let activeRooms = new Map()
 let totalConnections = 0
 let eventsPerMinute = 0
 let lastEventTime = Date.now()
 
-// Middleware pour la vérification du username
+// Middleware pour la vérification de l'authentification (Pseudo + Token)
 io.use((socket, next) => {
   const username = socket.handshake.query.username
+  const token = socket.handshake.query.token
 
-  if (!username) {
-    return next(new Error('Connection error: Username is required'))
+  if (!username || !token) {
+    return next(new Error('Connection error: Username and Token are required'))
   }
 
-  socket.data.room = 'general'
-  socket.data.username = username
-  next()
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET)
+
+    if (decoded.username !== username) {
+      return next(new Error('Connection error: Invalid token for this user'))
+    }
+
+    socket.data.room = 'general'
+    socket.data.username = username
+    socket.data.userId = decoded.userId
+    next()
+  } catch (err) {
+    console.error('JWT Verification Error:', err.message)
+    return next(new Error(`Authentication error: ${err.message}`))
+  }
 })
 
+// Gestion des connexions Socket.IO
 io.on('connection', (socket) => {
   const { room, username } = socket.data
 
@@ -141,7 +288,7 @@ io.on('connection', (socket) => {
 
   emitUserListUpdate()
 
-  // Rejoindre la Room
+  // Gestion de l'événement "Rejoindre une room"
   socket.on('join_room', async ({ roomName, roomId }) => {
     const oldRoom = socket.data.room
     const { username } = socket.data
@@ -219,7 +366,7 @@ io.on('connection', (socket) => {
     emitUserListUpdate()
   })
 
-  // Quitter la room
+  // Gestion de l'événement "Quitter la room"
   socket.on('leave_room', (roomToLeave) => {
     const { username } = socket.data
 
@@ -237,35 +384,7 @@ io.on('connection', (socket) => {
     emitUserListUpdate()
   })
 
-  // Gestion de la Déconnexion
-  socket.on('disconnect', () => {
-    totalConnections--
-    const { room, username } = socket.data
-
-    if (activeRooms.has(room)) {
-      activeRooms.get(room).users.delete(socket.id)
-      if (activeRooms.get(room).users.size === 0) {
-        activeRooms.delete(room)
-        console.log(`Room ${room} is empty and closed.`)
-      }
-    }
-
-    if (activeRooms.has(GLOBAL_KEY)) {
-      activeRooms.get(GLOBAL_KEY).users.delete(socket.id)
-    }
-
-    socket.to(room).emit('notification', `${username} a quitté l'espace.`)
-
-    console.log(`User ${username} disconnected. Total: ${totalConnections}`)
-    emitUserListUpdate()
-  })
-
-  // Notification de Connexion à la Room
-  //   socket.to(room).emit('notification', `${username} a rejoint l'espace.`)
-
-  //   socket.emit('initial_content', roomData.content)
-
-  // Gestion des Événements Temps Réel
+  // // Gestion de l'événement "Modifier une room"
   socket.on('update', async ({ room, content }) => {
     if (!activeRooms.has(room) || socket.data.room !== room) {
       console.warn(
@@ -294,6 +413,70 @@ io.on('connection', (socket) => {
     socket.to(room).emit('update', { room, content })
   })
 
+  // Gestion de l'événement "Supprimer une room"
+  socket.on('delete_room', async (roomToDelete) => {
+    if (!activeRooms.has(roomToDelete)) return
+
+    const roomData = activeRooms.get(roomToDelete)
+
+    if (
+      roomData.users.size !== 1 ||
+      roomData.users.keys().next().value !== socket.id
+    ) {
+      console.warn(
+        `[SECURITY] User ${socket.data.username} tried to delete non-empty room: ${roomToDelete}`
+      )
+      return socket.emit(
+        'delete_error',
+        "Seul l'unique utilisateur présent peut supprimer la Room."
+      )
+    }
+
+    socket.emit('notification', `Suppression de la Room ${roomToDelete}.`)
+    socket.leave(roomToDelete)
+    activeRooms.delete(roomToDelete)
+
+    try {
+      await deleteRoomFromDb(roomToDelete)
+      console.log(
+        `Room ${roomToDelete} deleted from DB by ${socket.data.username}.`
+      )
+
+      io.emit('room_deleted', roomToDelete)
+    } catch (e) {
+      console.error(`[DB ERROR] Failed to delete room ${roomToDelete}:`, e)
+      socket.emit(
+        'delete_error',
+        'Erreur serveur lors de la suppression de la Room.'
+      )
+    }
+
+    emitUserListUpdate()
+  })
+
+  // Gestion de l'événement "Déconnexion"
+  socket.on('disconnect', () => {
+    totalConnections--
+    const { room, username } = socket.data
+
+    if (activeRooms.has(room)) {
+      activeRooms.get(room).users.delete(socket.id)
+      if (activeRooms.get(room).users.size === 0) {
+        activeRooms.delete(room)
+        console.log(`Room ${room} is empty and closed.`)
+      }
+    }
+
+    if (activeRooms.has(GLOBAL_KEY)) {
+      activeRooms.get(GLOBAL_KEY).users.delete(socket.id)
+    }
+
+    socket.to(room).emit('notification', `${username} a quitté l'espace.`)
+
+    console.log(`User ${username} disconnected. Total: ${totalConnections}`)
+    emitUserListUpdate()
+  })
+
   function emitUserListUpdate() {
     const roomUsers = {}
     activeRooms.forEach((data, roomName) => {
@@ -311,6 +494,11 @@ io.on('connection', (socket) => {
     io.emit('user_list_update', roomUsers)
   }
 })
+
+// Notification de Connexion à la Room
+//   socket.to(room).emit('notification', `${username} a rejoint l'espace.`)
+
+//   socket.emit('initial_content', roomData.content)
 
 // Endpoint de Monitoring (/status)
 app.get('/status', async (req, res) => {

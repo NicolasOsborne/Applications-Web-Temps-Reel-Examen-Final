@@ -20,14 +20,18 @@
             <div class="title-bar-controls"><button aria-label="Close"></button></div>
          </div>
          <div class="window-body">
-            <p>Veuillez choisir votre pseudonyme pour continuer.</p>
+            <p>Veuillez vous connecter ou créer un compte.</p>
             <div class="field-row">
                <label for="username">Pseudo:</label>
                <input type="text" id="username" value="User_A">
             </div>
+            <div class="field-row">
+               <label for="password">Mot de passe:</label>
+               <input type="password" id="password" value="password">
+            </div>
             <section class="field-row" style="justify-content: flex-end">
-               <button onclick="loginAndShowDesktop()">Connexion</button>
-               <button disabled>Annuler</button>
+               <button onclick="handleAuth('login')">Connexion</button>
+               <button onclick="handleAuth('register')">Inscription</button>
             </section>
             <p id="error_message"></p>
          </div>

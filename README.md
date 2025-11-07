@@ -40,6 +40,6 @@ Dans le dossier [Partie A - Théorie](/Rendu%202/Partie%20A%20-%20Théorie/) :
 
 Dans le dossier [Partie B - Pratique](/Rendu%202/Partie%20B%20-%20Pratique/) :
 
-- Le code source pour le projet pratique de tableau blanc interactif "CollabBoard".
+- Le code source pour le projet pratique de tableau blanc interactif "CollabBoard" (avec base de données, sécurité, authentification et monitoring).
 
 - Se référer au fichier [README](/Rendu%202/Partie%20B%20-%20Pratique/README.md) pour lancer le projet.
