@@ -133,6 +133,12 @@ function createAndJoinNewRoom() {
   }
 }
 
+function deleteRoom(roomName) {
+  if (confirm(`Êtes-vous sûr de vouloir supprimer la Room "${roomName}" ?`)) {
+    socket.emit('delete_room', roomName)
+  }
+}
+
 function openRoomWindow(roomName, roomId) {
   if (openedRooms.has(roomName)) {
     const existingWindow = document.getElementById(`room-${roomName}`)
@@ -151,18 +157,25 @@ function openRoomWindow(roomName, roomId) {
   windowDiv.style.zIndex = 100
 
   windowDiv.innerHTML = `
-   <div class="title-bar">
+    <div class="title-bar">
       <div class="title-bar-text">${roomName}</div>
       <div class="title-bar-controls">
-         <button aria-label="Minimize"></button>
-         <button aria-label="Maximize"></button>
-         <button aria-label="Close" onclick="closeRoomWindow('${roomName}')"></button>
+        <button aria-label="Minimize"></button>
+        <button aria-label="Maximize"></button>
+        <button aria-label="Close" onclick="closeRoomWindow('${roomName}')"></button>
       </div>
-   </div>
-   <div class="window-body">
-      <textarea id="editor-${roomName}" data-room="${roomName}" placeholder="Soyez le premier à contribuer !"></textarea>
-   </div>
-   `
+    </div>
+    <div class="window-body">
+      <div class="field-row-stacked">
+        <textarea id="editor-${roomName}" data-room="${roomName}" placeholder="Soyez le premier à contribuer !"></textarea>
+      </div>
+      <section class="field-row" style="justify-content: flex-end; margin-top: 5px;">
+        <button id="delete-btn-${roomName}" onclick="deleteRoom('${roomName}')" disabled>
+          Supprimer la Room
+        </button>
+      </section>
+    </div>
+  `
   roomWindowsContainer.appendChild(windowDiv)
 
   socket.emit('join_room', { roomName, roomId })
@@ -170,6 +183,7 @@ function openRoomWindow(roomName, roomId) {
   openedRooms.set(roomName, {
     element: windowDiv,
     editor: document.getElementById(`editor-${roomName}`),
+    creatorId: null,
   })
 
   const editor = openedRooms.get(roomName).editor
@@ -201,13 +215,28 @@ function setupSocketListeners() {
     }
   })
 
-  socket.on('initial_content', ({ room, content }) => {
-    const roomState = openedRooms.get(room)
-    if (roomState && roomState.editor) {
-      roomState.editor.value = content
+  socket.on(
+    'initial_content',
+    ({ room, content, creatorId, currentUserId }) => {
+      const roomState = openedRooms.get(room)
+      if (roomState && roomState.editor) {
+        roomState.editor.value = content
+
+        roomState.creatorId = creatorId
+
+        const deleteBtn = document.getElementById(`delete-btn-${room}`)
+
+        if (deleteBtn && creatorId === currentUserId) {
+          deleteBtn.disabled = false
+          deleteBtn.title = 'Vous êtes le créateur de cette Room.'
+        } else if (deleteBtn) {
+          deleteBtn.disabled = true
+          deleteBtn.title = 'Seul le créateur de la Room peut la supprimer.'
+        }
+      }
+      loadDesktopIcons()
     }
-    loadDesktopIcons()
-  })
+  )
 
   socket.on('notification', (message) => {
     console.log(`[Notification] ${message}`)
@@ -219,11 +248,25 @@ function setupSocketListeners() {
     closeRoomWindow(openedRooms.keys().next().value)
   })
 
+  socket.on('delete_error', (message) => {
+    alert(`Erreur de suppression : ${message}`)
+    console.error(`[Delete Error] ${message}`)
+  })
+
   socket.on('user_list_update', (roomUsers) => {
     updateUserList(roomUsers)
   })
 
   socket.on('room_created', (room) => {
+    loadDesktopIcons()
+  })
+
+  socket.on('room_deleted', (roomName) => {
+    const roomState = openedRooms.get(roomName)
+    if (roomState) {
+      alert(`La Room "${roomName}" a été supprimée !`)
+      closeRoomWindow(roomName)
+    }
     loadDesktopIcons()
   })
 }

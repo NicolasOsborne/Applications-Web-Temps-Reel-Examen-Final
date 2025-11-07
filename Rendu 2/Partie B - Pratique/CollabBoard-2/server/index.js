@@ -29,6 +29,7 @@ function initalizeDatabase() {
       id TEXT PRIMARY KEY,
       name TEXT UNIQUE NOT NULL,
       content TEXT,
+      creator_user_id INTEGER NOT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `
@@ -185,7 +186,8 @@ function generateRoomId(length = 10) {
 // Récupérer une room depuis la base de données
 function getRoomFromDb(roomName) {
   return new Promise((resolve, reject) => {
-    const sql = 'SELECT id, name, content FROM rooms WHERE name = ?'
+    const sql =
+      'SELECT id, name, content, creator_user_id FROM rooms WHERE name = ?'
     db.get(sql, [roomName], (error, row) => {
       if (error) {
         reject(error)
@@ -197,22 +199,26 @@ function getRoomFromDb(roomName) {
 }
 
 // Sauvegarder une room dans la base de données
-function saveRoomToDb(roomName, content, roomId) {
+function saveRoomToDb(roomName, content, roomId, creatorId) {
   return new Promise((resolve, reject) => {
     const sql = `
-      INSERT OR REPLACE INTO rooms (id, name, content) 
-      VALUES (?, ?, ?)`
+      INSERT OR REPLACE INTO rooms (id, name, content, creator_user_id) 
+      VALUES (?, ?, ?, COALESCE((SELECT creator_user_id FROM rooms WHERE name = ?), ?))`
 
-    db.run(sql, [roomId, roomName, content], function (error) {
-      if (error) {
-        reject(error)
-      } else {
-        resolve({
-          message: 'Room sauvegardée/mise à jour.',
-          changes: this.changes,
-        })
+    db.run(
+      sql,
+      [roomId, roomName, content, roomName, creatorId],
+      function (error) {
+        if (error) {
+          reject(error)
+        } else {
+          resolve({
+            message: 'Room sauvegardée/mise à jour.',
+            changes: this.changes,
+          })
+        }
       }
-    })
+    )
   })
 }
 
@@ -268,7 +274,7 @@ io.use((socket, next) => {
 
 // Gestion des connexions Socket.IO
 io.on('connection', (socket) => {
-  const { room, username } = socket.data
+  const { room, username, userId } = socket.data
 
   totalConnections++
 
@@ -283,7 +289,7 @@ io.on('connection', (socket) => {
   activeRooms.get(GLOBAL_KEY).users.set(socket.id, username)
 
   console.log(
-    `[CONNECT] User ${username} (ID: ${socket.id}) connected. Total: ${totalConnections}`
+    `[CONNECT] User ${username} (ID: ${socket.id}, UserID: ${userId}) connected. Total: ${totalConnections}`
   )
 
   emitUserListUpdate()
@@ -291,14 +297,14 @@ io.on('connection', (socket) => {
   // Gestion de l'événement "Rejoindre une room"
   socket.on('join_room', async ({ roomName, roomId }) => {
     const oldRoom = socket.data.room
-    const { username } = socket.data
+    const { username, userId } = socket.data
     const newRoom = roomName
 
     let roomFromDb
     try {
       roomFromDb = await getRoomFromDb(newRoom)
-    } catch (e) {
-      console.error(`[DB ERROR] Failed to load room ${newRoom}:`, e)
+    } catch (error) {
+      console.error(`[DB ERROR] Failed to load room ${newRoom}:`, error)
       return socket.emit(
         'join_error',
         'Erreur serveur lors du chargement de la room.'
@@ -326,6 +332,7 @@ io.on('connection', (socket) => {
 
     let currentRoomId = roomId
     let initialContent = ''
+    let creatorId = null
 
     if (!activeRooms.has(newRoom)) {
       const newId = roomFromDb ? roomFromDb.id : generateRoomId()
@@ -338,11 +345,12 @@ io.on('connection', (socket) => {
       })
 
       if (!roomFromDb) {
+        creatorId = userId
         try {
-          await saveRoomToDb(newRoom, '', newId)
+          await saveRoomToDb(newRoom, '', newId, creatorId)
           io.emit('room_created', { name: newRoom, id: newId })
-        } catch (e) {
-          console.error(`[DB ERROR] Failed to create room ${newRoom}:`, e)
+        } catch (error) {
+          console.error(`[DB ERROR] Failed to create room ${newRoom}:`, error)
         }
       }
     }
@@ -351,10 +359,13 @@ io.on('connection', (socket) => {
     roomData.users.set(socket.id, username)
 
     initialContent = roomFromDb ? roomFromDb.content : ''
+    creatorId = creatorId || (roomFromDb ? roomFromDb.creator_user_id : null)
 
     socket.emit('initial_content', {
       room: newRoom,
       content: initialContent,
+      creatorId: creatorId,
+      currentUserId: userId,
     })
     socket.to(newRoom).emit('notification', `${username} a rejoint ${newRoom}.`)
 
@@ -415,20 +426,35 @@ io.on('connection', (socket) => {
 
   // Gestion de l'événement "Supprimer une room"
   socket.on('delete_room', async (roomToDelete) => {
+    const { userId } = socket.data
+
     if (!activeRooms.has(roomToDelete)) return
+
+    const roomFromDb = await getRoomFromDb(roomToDelete)
+    if (!roomFromDb) {
+      return socket.emit('delete_error', 'Room introuvable.')
+    }
+
+    // Vérifier que l'utilisateur est le créateur de la room
+    if (roomFromDb.creator_user_id !== userId) {
+      console.warn(
+        `[SECURITY] User ${socket.data.username} (ID: ${userId}) tried to delete room ${roomToDelete} (Creator ID: ${roomFromDb.creator_user_id}) without being the creator.`
+      )
+      return socket.emit(
+        'delete_error',
+        'Seul le créateur de la Room peut la supprimer.'
+      )
+    }
 
     const roomData = activeRooms.get(roomToDelete)
 
-    if (
-      roomData.users.size !== 1 ||
-      roomData.users.keys().next().value !== socket.id
-    ) {
+    if (roomData.users.size > 1) {
       console.warn(
         `[SECURITY] User ${socket.data.username} tried to delete non-empty room: ${roomToDelete}`
       )
       return socket.emit(
         'delete_error',
-        "Seul l'unique utilisateur présent peut supprimer la Room."
+        'Veuillez attendre que tous les autres utilisateurs quittent la Room avant de la supprimer.'
       )
     }
 
