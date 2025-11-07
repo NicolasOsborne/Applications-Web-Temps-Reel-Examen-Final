@@ -56,6 +56,9 @@ function connectSocket(username) {
 
   socket = io({
     query: { username, token: userToken },
+    reconnection: true,
+    reconnectionAttempts: 5,
+    reconnectionDelay: 1000,
   })
 
   socket.on('connect', () => {
@@ -63,14 +66,45 @@ function connectSocket(username) {
     desktopIconsContainer.style.display = 'flex'
     userListWindow.style.display = 'block'
 
-    loadDesktopIcons()
     setupSocketListeners()
+
+    if (socket.io.engine.previousSid) {
+      handleReconnect()
+    } else {
+      loadDesktopIcons()
+    }
   })
 
   socket.on('connect_error', (err) => {
     errorMsg.textContent = `Échec de la connexion Socket: ${err.message}`
-    if (socket) socket.close()
   })
+
+  socket.on('disconnect', (reason) => {
+    console.warn(`[SOCKET] Déconnecté : ${reason}. Tentative de reconnexion...`)
+    if (reason !== 'io client disconnect' && reason !== 'transport close') {
+      errorMsg.textContent = `Connexion perdue (${reason}). Reconnexion en cours...`
+    }
+  })
+
+  socket.on('reconnect', (attemptNumber) => {
+    console.log(
+      `[SOCKET] Reconnexion réussie après ${attemptNumber} tentatives.`
+    )
+    errorMsg.textContent = 'Connexion rétablie. Re-synchronisation...'
+    handleReconnect()
+  })
+}
+
+function handleReconnect() {
+  loadDesktopIcons()
+  openedRooms.forEach((roomState, roomName) => {
+    const roomId = roomState.id
+    socket.emit('join_room', { roomName, roomId })
+  })
+
+  setTimeout(() => {
+    errorMsg.textContent = ''
+  }, 2000)
 }
 
 window.onload = () => {
@@ -184,6 +218,7 @@ function openRoomWindow(roomName, roomId) {
     element: windowDiv,
     editor: document.getElementById(`editor-${roomName}`),
     creatorId: null,
+    id: roomId,
   })
 
   const editor = openedRooms.get(roomName).editor

@@ -7,6 +7,8 @@ const jwt = require('jsonwebtoken')
 const bcrypt = require('bcrypt')
 const SALT_ROUNDS = 10
 
+const sanitizeHtml = require('sanitize-html')
+
 require('dotenv').config()
 
 const JWT_SECRET = process.env.JWT_SECRET
@@ -296,6 +298,13 @@ io.on('connection', (socket) => {
 
   // Gestion de l'événement "Rejoindre une room"
   socket.on('join_room', async ({ roomName, roomId }) => {
+    // Vérification que le nom de la room n'est pas vide ou trop long
+    if (!roomName || roomName.trim().length === 0 || roomName.length > 50) {
+      return socket.emit(
+        'join_error',
+        'Le nom de la Room est invalide (doit contenir entre 1 et 50 caractères).'
+      )
+    }
     const oldRoom = socket.data.room
     const { username, userId } = socket.data
     const newRoom = roomName
@@ -320,9 +329,16 @@ io.on('connection', (socket) => {
       }
     }
 
-    if (oldRoom && activeRooms.has(oldRoom)) {
+    if (oldRoom && oldRoom !== 'general' && activeRooms.has(oldRoom)) {
       activeRooms.get(oldRoom).users.delete(socket.id)
       socket.leave(oldRoom)
+
+      if (activeRooms.get(oldRoom).users.size === 0) {
+        activeRooms.delete(oldRoom)
+        console.log(
+          `[CLEANUP] Room ${oldRoom} is empty and closed (due to user joining another).`
+        )
+      }
     }
 
     activeRooms.get(GLOBAL_KEY).users.delete(socket.id)
@@ -383,6 +399,13 @@ io.on('connection', (socket) => {
 
     if (activeRooms.has(roomToLeave)) {
       activeRooms.get(roomToLeave).users.delete(socket.id)
+
+      if (activeRooms.get(roomToLeave).users.size === 0) {
+        activeRooms.delete(roomToLeave)
+        console.log(
+          `[CLEANUP] Room ${roomToLeave} is empty and closed (due to user explicit leave).`
+        )
+      }
     }
 
     socket.leave(roomToLeave)
@@ -397,17 +420,24 @@ io.on('connection', (socket) => {
 
   // // Gestion de l'événement "Modifier une room"
   socket.on('update', async ({ room, content }) => {
-    if (!activeRooms.has(room) || socket.data.room !== room) {
-      console.warn(
-        `[SECURITY] User ${socket.data.username} tried to update unauthorized room: ${room}`
-      )
+    if (socket.data.room !== room) {
       return
     }
+
+    if (!activeRooms.has(room)) {
+      return
+    }
+
+    // N'autoriser aucun tag ni attribut HTML pour éviter l'éxécution de code malveillant côté navigateur chez les autres utilisateurs qui afficheront le contenu
+    const sanitizedContent = sanitizeHtml(content, {
+      allowedTags: [],
+      allowedAttributes: {},
+    })
 
     const roomData = activeRooms.get(room)
 
     try {
-      await saveRoomToDb(room, content, roomData.id)
+      await saveRoomToDb(room, sanitizedContent, roomData.id)
     } catch (error) {
       console.error(`[DB ERROR] Failed to save room ${room}:`, error)
     }
@@ -421,7 +451,7 @@ io.on('connection', (socket) => {
     }
     eventsPerMinute++
 
-    socket.to(room).emit('update', { room, content })
+    socket.to(room).emit('update', { room, content: sanitizedContent })
   })
 
   // Gestion de l'événement "Supprimer une room"
