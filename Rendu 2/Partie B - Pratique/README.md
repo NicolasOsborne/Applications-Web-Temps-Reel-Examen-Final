@@ -31,9 +31,34 @@ Il s'agit ici de la même application Collaboard (développée dans la partie pr
     })
   ```
 
-- Reconnexion automatique en cas de perte de connexion.
+- Reconnexion automatique en cas de perte de connexion
 
-- Monitoring (compteur de connexions, affichage de la latence, logs de synchronisation).
+- Monitoring (compteur de connexions, affichage de la latence, logs de synchronisation) visible dans un fichier app.log
+
+```bash
+   // Log du compteur de connexions
+   logger.info(`
+    `[CONNEXION] Utilisateur ${username} (ID: ${socket.id}) connecté. Total: ${totalConnections}`
+  )
+
+  // Log de latence
+  socket.on('pong', (latency) => {
+    logger.debug(`[LATENCE] Latence de ${socket.data.username}: ${latency}ms`)
+  })
+
+  // Log de synchronisation
+    logger.info(
+      `[SYNC] ${username} a rejoint la room: ${newRoom} (Ancienne room: ${oldRoom})`
+    )
+
+    logger.info(`[SYNC] ${socket.data.username} a quitté la room: ${roomToLeave}`)
+
+    logger.info(
+      `[DECONNEXION] Utilisateur ${username} déconnecté. Total: ${totalConnections}`
+    )
+
+
+```
 
 ## Technologies utilisées
 
@@ -54,6 +79,15 @@ Il s'agit ici de la même application Collaboard (développée dans la partie pr
 ```bash
 cd CollabBoard-2
 npm install
+```
+
+- ## Configurer une variable d'environnement pour le JWT
+  Créer un fichier .env à la racine du projet, et renseigner :
+
+```bash
+JWT_SECRET=SuPerSeCreTKey
+
+
 ```
 
 - Lancer l'application :

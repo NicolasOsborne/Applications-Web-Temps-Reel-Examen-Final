@@ -9,6 +9,24 @@ const SALT_ROUNDS = 10
 
 const sanitizeHtml = require('sanitize-html')
 
+// Monitoring
+const winston = require('winston')
+const { format, transports } = winston
+
+const logger = winston.createLogger({
+  level: 'info',
+  format: format.combine(
+    format.timestamp(),
+    format.printf(({ timestamp, level, message }) => {
+      return `[${timestamp}] ${level.toUpperCase()}: ${message}`
+    })
+  ),
+  transports: [
+    new transports.Console({ level: 'info' }),
+    new transports.File({ filename: 'app.log' }),
+  ],
+})
+
 require('dotenv').config()
 
 const JWT_SECRET = process.env.JWT_SECRET
@@ -276,6 +294,11 @@ io.use((socket, next) => {
 
 // Gestion des connexions Socket.IO
 io.on('connection', (socket) => {
+  // Log de latence
+  socket.on('pong', (latency) => {
+    logger.debug(`[LATENCE] Latence de ${socket.data.username}: ${latency}ms`)
+  })
+
   const { room, username, userId } = socket.data
 
   totalConnections++
@@ -290,9 +313,12 @@ io.on('connection', (socket) => {
   }
   activeRooms.get(GLOBAL_KEY).users.set(socket.id, username)
 
-  console.log(
-    `[CONNECT] User ${username} (ID: ${socket.id}, UserID: ${userId}) connected. Total: ${totalConnections}`
+  // Log du compteur de connexions
+  logger.info(
+    `[CONNEXION] Utilisateur ${username} (ID: ${socket.id}) connecté. Total: ${totalConnections}`
   )
+
+  socket.emit('ping')
 
   emitUserListUpdate()
 
@@ -385,10 +411,9 @@ io.on('connection', (socket) => {
     })
     socket.to(newRoom).emit('notification', `${username} a rejoint ${newRoom}.`)
 
-    console.log(
-      `[ROOM_CHANGE] ${username} joined: ${newRoom} (ID: ${
-        currentRoomId || roomFromDb.id
-      })`
+    // Log de synchronisation
+    logger.info(
+      `[SYNC] ${username} a rejoint la room: ${newRoom} (Ancienne room: ${oldRoom})`
     )
     emitUserListUpdate()
   })
@@ -414,7 +439,10 @@ io.on('connection', (socket) => {
 
     socket.data.room = 'general'
 
-    console.log(`[ROOM_LEAVE] ${socket.data.username} left: ${roomToLeave}`)
+    logger.info(
+      `[SYNC] ${socket.data.username} a quitté la room: ${roomToLeave}`
+    )
+
     emitUserListUpdate()
   })
 
@@ -529,7 +557,10 @@ io.on('connection', (socket) => {
 
     socket.to(room).emit('notification', `${username} a quitté l'espace.`)
 
-    console.log(`User ${username} disconnected. Total: ${totalConnections}`)
+    logger.info(
+      `[DECONNEXION] Utilisateur ${username} déconnecté. Total: ${totalConnections}`
+    )
+
     emitUserListUpdate()
   })
 
